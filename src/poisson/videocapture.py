@@ -1,18 +1,23 @@
+import numpy as np
 import cv2
-import os
-from datetime import datetime
 
 
-def capture_video(path : str = None, dev_id : int = 0):
-    video = cv2.VideoCapture(dev_id)
-    while True:
-        ret, img = video.read()
+def detect_corners(cv_img : np.ndarray) -> np.ndarray:
+    """
+        https://docs.opencv.org/3.4/dc/d0d/tutorial_py_features_harris.html
+    """
+    gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
 
-        cv2.imshow('live video', img)
-        
-        key =cv2.waitKey(100)
-        if key ==ord('q'):
-            break
+    # finding corners
+    gray = np.float32(gray)
+    dst = cv2.cornerHarris(gray, 2,3, 0.04)
+    dst = cv2.dilate(dst, None)
 
-    video.release()
-    cv2.destroyAllWindows()
+    return dst
+
+def detect_sift(cv_img : np.ndarray) -> np.ndarray:
+    gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
+    
+    sift = cv2.SIFT_create()
+    kp, des = sift.detectAndCompute(gray, None)
+    return kp, des
