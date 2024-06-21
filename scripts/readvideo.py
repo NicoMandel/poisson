@@ -2,7 +2,7 @@ import os.path
 from argparse import ArgumentParser
 import cv2
 
-from poisson.videocapture import detect_corners, detect_sift
+from poisson.videocapture import detect_corners, detect_sift, detect_circles, draw_circles
 
 def parse_args(basedir : str):
     parser = ArgumentParser()
@@ -35,12 +35,20 @@ if __name__=="__main__":
     ret, frame = cap.read()
     while(cap.isOpened()):
         ret, frame = cap.read()
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        # 1 - detect and draw corners:
         dst = detect_corners(frame)
         # thresholding and marking green
         # frame[dst>0.01*dst.max()] = [0, 255, 0]
-        kp, _ = detect_sift(frame)
-        img = cv2.drawKeypoints(frame, kp, frame)
-        cv2.imshow('frame', frame)
+        
+        # 2 - detect and draw keypoints
+        # kp, _ = detect_sift(frame)
+        # img = cv2.drawKeypoints(frame, kp, frame)
+
+        # 3 - detect and draw circles
+        circ = detect_circles(frame)
+        img = draw_circles(gray, circ)
+        cv2.imshow('frame', img)
         # break condition
         if cv2.waitKey(25) & 0xFF == ord('q') or ret==False:
             cap.release()
