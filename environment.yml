@@ -1,6 +1,10 @@
 name: poisson
 channels:
+  - conda-forge
   - defaults
 dependencies:
+  - python=3.10
   - opencv
-prefix: /home/nico/miniconda3/envs/poisson
+  - numpy
+  - matplotlib
+  - pyserial
