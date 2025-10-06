@@ -1,25 +1,25 @@
-# run_calibration.py
 import numpy as np
 import cv2
 import glob
 from config import CHECKERBOARD_DIMS, IMAGE_DIR, SQUARE_SIZE_MM
 
 # --- Parameters ---
-checkerboard_dims = CHECKERBOARD_DIMS # (corners_wide, corners_high)
-SQUARE_SIZE_MM = SQUARE_SIZE_MM # <--- SET THIS to the real-world size of your checker squares in mm
+checkerboard_dims = CHECKERBOARD_DIMS
+SQUARE_SIZE_MM = SQUARE_SIZE_MM
 image_dir = IMAGE_DIR
 # ------------------
 
-# Prepare object points
+# Prepare object points (now scaled to real-world mm)
 objp = np.zeros((checkerboard_dims[0] * checkerboard_dims[1], 3), np.float32)
 objp[:,:2] = np.mgrid[0:checkerboard_dims[0], 0:checkerboard_dims[1]].T.reshape(-1,2)
-objp = objp * SQUARE_SIZE_MM # Scale object points to real-world size
+objp = objp * SQUARE_SIZE_MM
 
 # Arrays to store points
-objpoints = [] # 3D points in real world space
-imgpoints = [] # 2D points in image plane
+objpoints = []
+imgpoints = []
 
 images = glob.glob(image_dir)
+gray = None # Initialize gray to ensure it has a value
 
 for fname in images:
     img = cv2.imread(fname)
@@ -34,53 +34,27 @@ for fname in images:
     else:
         print(f"Corners NOT found in {fname}")
 
-# --- Perform Calibration ---
-ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, gray.shape[::-1], None, None)
+if not objpoints:
+    print("\nError: No chessboard corners were found in any images. Calibration cannot proceed.")
+    print("Please check your CHECKERBOARD_DIMS, image quality, and lighting.")
+else:
+    # --- Perform Calibration ---
+    ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, gray.shape[::-1], None, None)
 
-if ret:
-    print("\n" + "="*40)
-    print("      Calibration Successful!")
-    print(f"\nOverall Mean Re-projection Error: {ret:.4f} pixels")
-    print("="*40 + "\n")
-
-    # --- NEW: Calculate Pixels-per-Millimeter Ratio ---
-    print("Calculating pixels-per-mm ratio...")
-    # Use the first image for this calculation
-    first_image_path = images[0]
-    img = cv2.imread(first_image_path)
-    
-    # Undistort the image to get accurate measurements
-    h, w = img.shape[:2]
-    newcameramtx, roi = cv2.getOptimalNewCameraMatrix(mtx, dist, (w,h), 1, (w,h))
-    undistorted_img = cv2.undistort(img, mtx, dist, None, newcameramtx)
-    
-    # Re-find corners on the undistorted image
-    gray_undistorted = cv2.cvtColor(undistorted_img, cv2.COLOR_BGR2GRAY)
-    ret, corners_undistorted = cv2.findChessboardCorners(gray_undistorted, checkerboard_dims, None)
-    
     if ret:
-        # Get the first two adjacent corners
-        corner1 = corners_undistorted[0][0] # Top-left corner
-        corner2 = corners_undistorted[1][0] # Corner to its right
-        
-        # Calculate the Euclidean distance in pixels
-        pixel_distance = np.linalg.norm(corner1 - corner2)
-        
-        # Calculate the ratio
-        pixels_per_mm = pixel_distance / SQUARE_SIZE_MM
-        
-        print(f"  - Pixel distance between corners: {pixel_distance:.2f} px")
-        print(f"  - Known square size: {SQUARE_SIZE_MM} mm")
-        print(f"  - Calculated Ratio: {pixels_per_mm:.2f} pixels/mm\n")
-        
-        # --- Save ALL calibration data ---
-        np.savez('camera_calibration_data.npz', 
-                 mtx=mtx, 
-                 dist=dist, 
-                 pixels_per_mm=pixels_per_mm)
-        print("Calibration data (including pixels_per_mm) saved to camera_calibration_data.npz")
-    else:
-        print("Could not find corners on the first undistorted image to calculate scale.")
-        # Save without the ratio if calculation fails
+        print("\n" + "="*40)
+        print("      Calibration Successful!")
+        print(f"\nOverall Mean Re-projection Error: {ret:.4f} pixels")
+        print("="*40 + "\n")
+        print("0.0-0.5 excellent")
+        print("0.5-1.0 sufficient")
+        print(">1.00 bad")
+        print("\n"+"="*40 + "\n")
+
+        # --- Save ONLY the camera matrix and distortion coefficients ---
+        # The pixels_per_mm ratio will be calculated in the main analysis script
+        # based on the specific video being analyzed for higher accuracy.
         np.savez('camera_calibration_data.npz', mtx=mtx, dist=dist)
-        print("Calibration data (WITHOUT pixels_per_mm) saved.")
+        print("Calibration data (mtx, dist) saved to camera_calibration_data.npz")
+    else:
+        print("\nCalibration failed.")
