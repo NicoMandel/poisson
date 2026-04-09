@@ -8,22 +8,20 @@ import os
 # --- Add 'src' directory to Python's path ---
 sys.path.append('src')
 import tracking_functions as tf
+
 # --- Import calibration parameters from config ---
-from config import CHECKERBOARD_DIMS, SQUARE_SIZE_MM, TRACKING_ALG, GAUSSIAN_BLUR, DATA_D, RESULTS_D, CAL_FILE, SCALING_VIDEO_FILE, TRACKING_VIDEO_FILE 
+import config
 
 # --- Parameters and File Paths ---
-TRACKING_ALGORITHM = TRACKING_ALG
-USE_GAUSSIAN_BLUR = GAUSSIAN_BLUR
+TRACKING_ALGORITHM = config.TRACKING_ALG
+USE_GAUSSIAN_BLUR = config.GAUSSIAN_BLUR
+TEMPLATE_UPDATE_THRESHOLD = getattr(config, 'TEMPLATE_UPDATE_THRESHOLD', 0.85)
 
-
-DATA_DIR = DATA_D
-RESULTS_DIR = RESULTS_D
-CALIBRATION_FILENAME = CAL_FILE
-
-# 1. A short video of the checkerboard at the specimen's focal plane
-SCALING_VIDEO_FILENAME = SCALING_VIDEO_FILE
-# 2. The video of the actual test with the deforming specimen
-TRACKING_VIDEO_FILENAME = TRACKING_VIDEO_FILE
+DATA_DIR = config.DATA_D
+RESULTS_DIR = config.RESULTS_D
+CALIBRATION_FILENAME = config.CAL_FILE
+SCALING_VIDEO_FILENAME = config.SCALING_VIDEO_FILE
+TRACKING_VIDEO_FILENAME = config.TRACKING_VIDEO_FILE
 
 CALIBRATION_FILE = os.path.join(DATA_DIR, CALIBRATION_FILENAME)
 
@@ -70,51 +68,39 @@ def get_zoomed_view(full_img, win_w, win_h, zoom):
     return cv2.resize(full_img[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w], (win_w, win_h))
 
 # --- Main Application ---
-# 1. Load camera calibration data (mtx and dist)
+# 1. Load camera calibration data
 with np.load(CALIBRATION_FILE) as data:
     mtx, dist = data['mtx'], data['dist']
 
-# 2. Perform Automatic Scaling using the scaling video
+# 2. Perform Automatic Scaling
 print("--- Step 1: Automatic Scale Calculation ---")
 SCALING_VIDEO_FILE = os.path.join(DATA_DIR, SCALING_VIDEO_FILENAME)
 scale_cap = cv2.VideoCapture(SCALING_VIDEO_FILE)
 if not scale_cap.isOpened(): exit(f"Error: Could not open scaling video file at '{SCALING_VIDEO_FILE}'")
 ret, scale_frame = scale_cap.read()
 if not ret: exit(f"Error: Could not read the first frame from '{SCALING_VIDEO_FILE}'.")
-scale_cap.release() # We only need the first frame
+scale_cap.release()
 
-# Undistort the scaling frame
 img_h, img_w = scale_frame.shape[:2]
 newcameramtx, _ = cv2.getOptimalNewCameraMatrix(mtx, dist, (img_w, img_h), 1, (img_w, img_h))
 scale_frame_undistorted = cv2.undistort(scale_frame, mtx, dist, None, newcameramtx)
 gray_undistorted = cv2.cvtColor(scale_frame_undistorted, cv2.COLOR_BGR2GRAY)
 
 pixels_per_mm = None
-ret, corners = cv2.findChessboardCorners(gray_undistorted, CHECKERBOARD_DIMS, None)
+ret, corners = cv2.findChessboardCorners(gray_undistorted, config.CHECKERBOARD_DIMS, None)
 
 if ret:
-    print("Checkerboard found in scaling video! Calculating robust scale...")
-    corners_reshaped = corners.reshape(CHECKERBOARD_DIMS[1], CHECKERBOARD_DIMS[0], 2)
+    print("Checkerboard found! Calculating robust scale...")
+    corners_reshaped = corners.reshape(config.CHECKERBOARD_DIMS[1], config.CHECKERBOARD_DIMS[0], 2)
     horizontal_distances = np.linalg.norm(corners_reshaped[:, :-1] - corners_reshaped[:, 1:], axis=2)
     vertical_distances = np.linalg.norm(corners_reshaped[:-1, :] - corners_reshaped[1:, :], axis=2)
-    
-    # ** FIX: Concatenate the two distance arrays into one before averaging **
     all_distances = np.concatenate((horizontal_distances.flatten(), vertical_distances.flatten()))
     avg_pixel_distance = np.mean(all_distances)
 
-    pixels_per_mm = avg_pixel_distance / SQUARE_SIZE_MM
+    pixels_per_mm = avg_pixel_distance / config.SQUARE_SIZE_MM
     print(f"--> Calculated robust scale: {pixels_per_mm:.4f} pixels/mm")
 else:
-    # ** NEW: Fail-fast logic if checkerboard is not found **
-    print("\n" + "="*60)
-    print("FATAL ERROR: Checkerboard not found in the scaling video.")
-    print(f"Could not automatically determine the scale from '{SCALING_VIDEO_FILENAME}'.")
-    print("\nTroubleshooting:")
-    print("  1. Ensure the checkerboard is flat, well-lit, and in focus.")
-    print("  2. Check that CHECKERBOARD_DIMS in 'config.py' is correct.")
-    print("  3. Ensure the entire checkerboard is visible in the first frame.")
-    print("\nExiting program.")
-    print("="*60)
+    print("\nFATAL ERROR: Checkerboard not found in the scaling video. Exiting.")
     exit()
 
 # 3. Load Tracking Video for point selection
@@ -123,19 +109,14 @@ TRACKING_VIDEO_FILE = os.path.join(DATA_DIR, TRACKING_VIDEO_FILENAME)
 track_cap = cv2.VideoCapture(TRACKING_VIDEO_FILE)
 if not track_cap.isOpened(): exit(f"Error: Could not open tracking video at '{TRACKING_VIDEO_FILE}'")
 ret, first_track_frame = track_cap.read()
-if not ret: exit(f"Error: Could not read first frame from '{TRACKING_VIDEO_FILE}'.")
+if not ret: exit(f"Error: Could not read first frame.")
 
-# Undistort the first frame of the tracking video
-img_h, img_w = first_track_frame.shape[:2] # Re-get shape in case it's different
-newcameramtx, _ = cv2.getOptimalNewCameraMatrix(mtx, dist, (img_w, img_h), 1, (img_w, img_h))
 first_frame_undistorted = cv2.undistort(first_track_frame, mtx, dist, None, newcameramtx)
 
 win_h, win_w = 720, 1280
-prompt = 'Select 2 points to track'
-window_name = f'Setup: {prompt} | Press ENTER to confirm'
+window_name = f'Setup: Select 2 points | Press ENTER to confirm'
 cv2.namedWindow(window_name)
-callback_params = {'img_shape': (img_h, img_w), 'win_w': win_w, 'win_h': win_h}
-cv2.setMouseCallback(window_name, zoom_pan_mouse_callback, callback_params)
+cv2.setMouseCallback(window_name, zoom_pan_mouse_callback, {'img_shape': (img_h, img_w), 'win_w': win_w, 'win_h': win_h})
 
 while True:
     view = get_zoomed_view(first_frame_undistorted, win_w, win_h, zoom_state)
@@ -150,21 +131,28 @@ while True:
 cv2.destroyAllWindows()
 
 
-# --- Initialize Tracking ---
+# --- Initialize Tracking States ---
 tracked_points_px = np.array(points, dtype=np.float32)
+
+# Specific initializations for different algorithms
 ref_gray = cv2.cvtColor(first_frame_undistorted, cv2.COLOR_BGR2GRAY)
+prev_gray = ref_gray.copy() # Required for LK
+prev_points_lk = tracked_points_px.reshape(-1, 1, 2) # Required for LK
+current_templates = tracked_points_px.copy() # Required for dynamic NCC/ECC updates
+
 initial_pixel_distance = np.linalg.norm(tracked_points_px[0] - tracked_points_px[1])
 initial_length_mm = initial_pixel_distance / pixels_per_mm
 results, frame_idx = [], 0
+
 track_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 total_frames = int(track_cap.get(cv2.CAP_PROP_FRAME_COUNT))
-print(f"\n--- Step 3: Starting Tracking --- \nTracking {total_frames} frames... (Press 'q' to stop early)")
+print(f"\n--- Step 3: Starting {TRACKING_ALGORITHM} Tracking --- \nTracking {total_frames} frames... (Press 'q' to stop early)")
 
 # --- Main Tracking Loop ---
 try:
     while True:
         if frame_idx >= total_frames: break
-        ret, frame = track_cap.read();
+        ret, frame = track_cap.read()
         if not ret: break
         frame_idx += 1
         
@@ -172,11 +160,46 @@ try:
         cur_gray = cv2.cvtColor(cur_undistorted, cv2.COLOR_BGR2GRAY)
 
         new_tracked_points = []
-        for p_start in points:
-            new_pos, _ = tf.track_subset_ncc(ref_gray, cur_gray, p_start, 31, USE_GAUSSIAN_BLUR)
-            new_tracked_points.append(new_pos)
-        tracked_points_px = np.array(new_tracked_points)
-        
+        update_ref = False
+
+        # --- ALGORITHM ROUTING ---
+        if TRACKING_ALGORITHM == 'NCC':
+            for i in range(len(points)):
+                last_known_pos = tracked_points_px[i]
+                new_pos, score = tf.track_subset_ncc_roi(ref_gray, cur_gray, current_templates[i], last_known_pos, 31, 30, USE_GAUSSIAN_BLUR)
+                new_tracked_points.append(new_pos)
+                
+                # Dynamic template updating
+                if score < TEMPLATE_UPDATE_THRESHOLD:
+                    current_templates[i] = new_pos
+                    update_ref = True
+                    
+            tracked_points_px = np.array(new_tracked_points)
+            if update_ref: ref_gray = cur_gray.copy()
+            
+        elif TRACKING_ALGORITHM == 'LK':
+            new_points, status = tf.track_subset_lk(prev_gray, cur_gray, prev_points_lk, USE_GAUSSIAN_BLUR)
+            tracked_points_px = new_points.reshape(-1, 2)
+            
+            # Frame-to-frame step forward
+            prev_gray = cur_gray.copy()
+            prev_points_lk = new_points.copy()
+            
+        elif TRACKING_ALGORITHM == 'ECC':
+            for i in range(len(points)):
+                new_pos, score = tf.track_subset_ecc(ref_gray, cur_gray, current_templates[i], 31, USE_GAUSSIAN_BLUR)
+                new_tracked_points.append(new_pos)
+                
+                # Dynamic template updating for ECC
+                if score < TEMPLATE_UPDATE_THRESHOLD:
+                    current_templates[i] = new_pos
+                    update_ref = True
+                    
+            tracked_points_px = np.array(new_tracked_points)
+            if update_ref: ref_gray = cur_gray.copy()
+
+
+        # --- Visualization & Logging ---
         p1_mm, p2_mm = tracked_points_px / pixels_per_mm
         current_length_mm = np.linalg.norm(p1_mm - p2_mm)
         length_change_mm = current_length_mm - initial_length_mm
@@ -186,7 +209,8 @@ try:
         cv2.line(cur_undistorted, tuple(map(int, tracked_points_px[0])), tuple(map(int, tracked_points_px[1])), (0, 255, 0), 2)
         for p in tracked_points_px: cv2.circle(cur_undistorted, (int(p[0]), int(p[1])), 5, (0, 255, 0), -1)
         cv2.putText(cur_undistorted, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        cv2.imshow("Tracking...", cur_undistorted)
+        cv2.imshow(f"Tracking using {TRACKING_ALGORITHM}...", cur_undistorted)
+        
         if cv2.waitKey(1) & 0xFF == ord('q'): break
 finally:
     track_cap.release()
@@ -194,7 +218,6 @@ finally:
     if results:
         os.makedirs(RESULTS_DIR, exist_ok=True)
         df = pd.DataFrame(results)
-        output_filename = f"results_{TRACKING_ALGORITHM}_{time.strftime('%Y%m%d-%H%M%S')}.csv"
-        output_path = os.path.join(RESULTS_DIR, output_filename)
+        output_path = os.path.join(RESULTS_DIR, f"results_{TRACKING_ALGORITHM}_{time.strftime('%Y%m%d-%H%M%S')}.csv")
         df.to_csv(output_path, index=False)
         print(f"\nTracking stopped. Saved {len(results)} frames to '{output_path}'")
