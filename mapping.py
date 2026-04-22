@@ -7,13 +7,13 @@ from scipy.interpolate import interp1d
 # --- Configuration & File Paths ---
 RESULTS_DIR = 'results'
 OPTICAL_CSV_FILENAME = 'tracking_results.csv'  # Your camera tracking data
-MACHINE_CSV_FILENAME = 'FCC_0_1.csv'           # Your newly provided machine data
+MACHINE_CSV_FILENAME = 'Cube_90_3.csv'           # Your newly provided machine data
 
 OPTICAL_CSV_PATH = os.path.join(RESULTS_DIR, OPTICAL_CSV_FILENAME)
 MACHINE_CSV_PATH = os.path.join(RESULTS_DIR, MACHINE_CSV_FILENAME)
 
 # Specimen Parameters
-AREA_MM2 = 40.0 * 40.0  # 40x40mm = 1600 mm^2
+AREA_MM2 = 100.0 * 40.0  
 
 def main():
     print("Loading data...")
